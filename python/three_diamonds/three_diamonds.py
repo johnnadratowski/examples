@@ -49,8 +49,8 @@ if __name__ == '__main__':
 
     total_directions = directions[0]["legs"][0]
 
-    print("Remote Coords: ", remote_coords)
-    print("Remote Addr: ", remote_addr)
+    print("Remote Coords: ", icloud_coords)
+    print("Remote Addr: ", icloud_addr)
     print("Local Coords: ", local_coords)
     print("Local Addr: ", local_addr)
     print("Distance: ", total_directions["distance"], total_directions["duration"])
