@@ -33,7 +33,7 @@ def get_prs(date, repo, user, password):
     return pr_data
 
 
-def get_tickets(date, user, password):
+def get_pr_tickets(date, user, password):
     """Get all tickets from commit messages that were merged into the current branch
     past the given date"""
     repo = subprocess.getoutput('basename `git rev-parse --show-toplevel`')
@@ -82,7 +82,20 @@ def get_tickets(date, user, password):
     return output
 
 
+def get_jira_data(tickets, jira_user, jira_password):
+    """Matches up ticket data with whats in JIRA"""
+    jira_data = {}
+    for ticket in tickets:
+        ticket_resp = requests.get("https://unified.jira.com/rest/api/latest/issue/" + ticket, auth=(jira_user, jira_password))
+        if ticket_resp.status_code != 200:
+            jira_data[ticket] = "An error occurred getting this ticket info from JIRA"
+        else:
+            jira_data[ticket] = ticket_resp.json()
+    return jira_data
+
+
 def get_tag_date(tag):
+    """Get the date that a tag was added to a git repo"""
     tags_data = subprocess.getoutput('git log --tags --simplify-by-decoration --pretty="format:%ai %d"')
     for tag_data in tags_data.split("\n"):
         if "tag: %s" % tag in tag_data:
@@ -91,17 +104,48 @@ def get_tag_date(tag):
     sys.exit(1)
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="""
-                                     Get all of the ticket numbers from commits in PRs made since the specified date.
-                                     Must either be explicitly given a date, or given a tag and the tag date will be used.
-                                     Output as JSON with tickets and error messages.""")
-    parser.add_argument('--tag', '-t', dest='tag', help='Get all PRs since tag')
-    parser.add_argument('--date', '-d', dest='date', help='The date to start looking for PRs - like 2016-01-28')
-    parser.add_argument('--user', '-u', dest='user', help='The github api user to use')
-    parser.add_argument('--password', '-p', dest='password', help='The github api password to use')
-    args = parser.parse_args()
+def resolve_jira_tickets(tickets, jira_user, jira_password):
+    """Resolve the jira data to the tickets from the commits and PRs"""
+    jira_data = get_jira_data(tickets, jira_user, jira_password)
 
+    tickets_with_resolutions = {}
+    for ticket in tickets:
+        fields = jira_data[ticket].get('fields', {})
+        if not fields:
+            continue
+
+        ticket_data = {}
+        ticket_data['status'] = fields.get('status', {}).get('name', 'unknown')
+
+        linked_issues = []
+        links = fields.get('issuelinks', [])
+        for link in links:
+            outIssue = link.get('outwardIssue', {}).get('key')
+            if outIssue:
+                linked_issues.append(outIssue)
+        if linked_issues:
+            all_linked_data, linked_data = resolve_jira_tickets(linked_issues, jira_user, jira_password)
+            jira_data.update(all_linked_data)
+            ticket_data['linked_issues'] = linked_data
+        tickets_with_resolutions[ticket] = ticket_data
+
+    return jira_data, tickets_with_resolutions
+
+
+def get_all_ticket_data(date, github_user, github_password, jira_user, jira_password):
+    """Gets all of the ticket data since the given date"""
+    output = get_pr_tickets(date, github_user, github_password)
+    output['tickets'] = sorted(list(output['tickets']))
+    if jira_user and jira_password:
+        jira_data, ticket_resolutions = resolve_jira_tickets(output['tickets'], jira_user, jira_password)
+
+        output["_all_jira_data"] = jira_data
+        output['tickets_with_resolutions'] = ticket_resolutions
+    return output
+
+
+def setup_args(args):
+    """Set up all of the args given to the command line"""
     if not os.path.isdir(os.path.abspath("./.git")):
         log.error("You must run this from a git repo root folder")
         sys.exit(1)
@@ -111,7 +155,8 @@ if __name__ == "__main__":
         log.error("Your branch is out of date - rerun this after you pull")
         sys.exit(1)
 
-    if not args.date:
+    date = args.date
+    if not date:
         if not args.tag:
             log.error("Must specify either the explicit date to find PR tickets from, or a git tag that will serve as the start date.")
             sys.exit(1)
@@ -119,23 +164,52 @@ if __name__ == "__main__":
             date = get_tag_date(args.tag)
             log.warning("Getting every commit since tag %s date: %s", args.tag, date)
     else:
-        date = args.date
         log.warning("Getting every commit since date: %s", date)
 
-    if not args.user:
+    github_user = args.github_user
+    if not github_user:
         log.error("Must specify a git user")
         sys.exit(1)
 
     log.warning("%s - make sure this is the right branch you want to run from!", subprocess.getoutput('git rev-parse --abbrev-ref HEAD'))
 
-    if not args.password:
-        password = getpass.getpass("Enter github password for user %s: " % args.user)
+    github_password = args.github_password
+    if not github_password:
+        github_password = getpass.getpass("Enter github password for user %s: " % github_user)
+
+    jira_user = args.jira_user
+    jira_password = args.jira_password
+    if not jira_user:
+        log.warning("No jira user specified, will not match up to JIRA.")
+    elif not jira_password:
+        jira_password = getpass.getpass("Enter jira password for user %s: " % jira_user)
+
+    return date, github_user, github_password, jira_user, jira_password
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="""
+                                     Get all of the ticket numbers from commits in PRs made since the specified date.
+                                     Must either be explicitly given a date, or given a tag and the tag date will be used.
+                                     Output as JSON with tickets and error messages.""")
+    parser.add_argument('--all-data', '-a', action="store_true", dest='all', help='Output all of the retrieved data')
+    parser.add_argument('--tag', '-t', dest='tag', help='Get all PRs since tag')
+    parser.add_argument('--date', '-d', dest='date', help='The date to start looking for PRs - like 2016-01-28')
+    parser.add_argument('--github-user', '-g', dest='github_user', help='The github api user to use')
+    parser.add_argument('--github-password', '-G', dest='github_password', help='The github api password to use')
+    parser.add_argument('--jira-user', '-j', dest='jira_user', help='The jira api user to use')
+    parser.add_argument('--jira-password', '-J', dest='jira_password', help='The jira api password to use')
+    args = parser.parse_args()
+
+    date, github_user, github_password, jira_user, jira_password = setup_args(args)
+
+    output = get_all_ticket_data(date, github_user, github_password, jira_user, jira_password)
+
+    if args.all:
+        print(json.dumps(output, sort_keys=True, indent=4, separators=(',', ': ')))
+    elif 'tickets_with_resolutions' in output:
+        print(json.dumps(output['tickets_with_resolutions'], sort_keys=True, indent=4, separators=(',', ': ')))
     else:
-        password = args.password
-
-    output = get_tickets(date, args.user, password)
-
-    output['tickets'] = sorted(list(output['tickets']))
-    print(json.dumps(output, sort_keys=True, indent=4, separators=(',', ': ')))
+        print(json.dumps(output['tickets'], sort_keys=True, indent=4, separators=(',', ': ')))
 
     sys.exit(0)
