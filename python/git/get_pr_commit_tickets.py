@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 import argparse
+import dateutil.parser
+import dateutil.tz
 import getpass
 import json
 import logging
@@ -11,47 +13,71 @@ import sys
 
 log = logging.getLogger()
 
+def get_prs(date, repo, user, password):
+    """Get all PRs from the repo that were merged past or at the given date"""
+    pull_requests_resp = requests.get("https://api.github.com/repos/Unified/%s/pulls?state=closed" % (repo), auth=(user, password))
+    if pull_requests_resp.status_code != 200:
+        log.error("An error occurred making API call to get PRs: Code: %d Message: %s", pull_requests_resp.status_code, pull_requests_resp.json())
+        sys.exit(1)
+
+    pr_data = []
+    pull_requests = pull_requests_resp.json()
+    for pull_request in pull_requests:
+        merged_at_str = pull_request.get("merged_at")
+        if not merged_at_str:
+            continue
+        merged_at_time = dateutil.parser.parse(merged_at_str).astimezone(dateutil.tz.tzlocal())
+        if merged_at_time.date() >= dateutil.parser.parse(date).date():
+            pr_data.append(pull_request)
+
+    return pr_data
+
+
 def get_tickets(date, user, password):
-
+    """Get all tickets from commit messages that were merged into the current branch
+    past the given date"""
     repo = subprocess.getoutput('basename `git rev-parse --show-toplevel`')
-    prs = subprocess.getoutput('git log --after="{date}" --grep="Merge pull request" --format="%s"'.format(date=date))
-    prs = prs.split("\n")
-    prs = [re.search("\#([0-9]+)", pr).group(1) for pr in prs]
+    prs = get_prs(date, repo, user, password)
+    pr_numbers = sorted([pr["number"] for pr in prs])
 
-    commits = [requests.get("https://api.github.com/repos/Unified/%s/pulls/%s/commits" % (repo, pr), auth=(user, password)) for pr in prs]
+    commits = [requests.get("https://api.github.com/repos/Unified/%s/pulls/%d/commits" % (repo, pr_num), auth=(user, password)) for pr_num in pr_numbers]
     output = {
+        '_all_pr_data': prs,
         'tickets': set(),
+        'num_commits_per_pr': {},
         'no_message': [],
         'invalid_message': []
     }
-    for pull_commits in commits:
-        if pull_commits.status_code != 200:
-            log.error("An error occurred making API call: Code: %d Message: %s", pull_commits.status_code, pull_commits.json())
+    for idx, pull_commits_resp in enumerate(commits):
+        if pull_commits_resp.status_code != 200:
+            log.error("An error occurred making API call to get commits: Code: %d Message: %s", pull_commits_resp.status_code, pull_commits_resp.json())
             sys.exit(1)
 
-        for commit in pull_commits.json():
+        pull_commits = pull_commits_resp.json()
+        output['num_commits_per_pr'][pr_numbers[idx]] = len(pull_commits)
+        for commit in pull_commits:
             try:
                 commit_data = commit.get('commit', {})
                 commit_msg = commit_data.get('message')
                 if not commit_msg:
-                    output['no_message'].append("No commit message: %s" % json.dumps(commit, sort_keys=True, indent=4, separators=(',', ': ')))
+                    output['no_message'].append(commit)
                     continue
 
-                ticket_matches = re.search("^([a-zA-Z]+\-[0-9]+)", commit_msg)
+                ticket_matches = re.findall(r"\b([A-Z]{2,5}\-[0-9]{1,5})\b", commit_msg)
                 if not ticket_matches:
-                    output['invalid_message'].append("Commit message invalid: %s" % json.dumps(commit, sort_keys=True, indent=4, separators=(',', ': ')))
+                    output['invalid_message'].append(commit)
                     continue
 
-                output['tickets'].add(ticket_matches.group(1))
+                output['tickets'].update(ticket_matches)
             except:
                 log.exception("An error occurred processing commit: %s", json.dumps(commit, sort_keys=True, indent=4, separators=(',', ': ')))
                 sys.exit(1)
 
     pr_output = {}
-    for idx, pr in enumerate(prs):
+    for idx, pr in enumerate(pr_numbers):
         pr_output[pr] = commits[idx].json()
 
-    output['prs_and_commits'] = pr_output
+    output['_prs_and_commits'] = pr_output
 
     return output
 
@@ -91,14 +117,16 @@ if __name__ == "__main__":
             sys.exit(1)
         else:
             date = get_tag_date(args.tag)
+            log.warning("Getting every commit since tag %s date: %s", args.tag, date)
     else:
         date = args.date
+        log.warning("Getting every commit since date: %s", date)
 
     if not args.user:
         log.error("Must specify a git user")
         sys.exit(1)
 
-    log.warning("%s - make sure this is the right branch you want to run from!", is_up_to_date.split("\n")[1])
+    log.warning("%s - make sure this is the right branch you want to run from!", subprocess.getoutput('git rev-parse --abbrev-ref HEAD'))
 
     if not args.password:
         password = getpass.getpass("Enter github password for user %s: " % args.user)
@@ -107,7 +135,7 @@ if __name__ == "__main__":
 
     output = get_tickets(date, args.user, password)
 
-    output['tickets'] = list(output['tickets'])
+    output['tickets'] = sorted(list(output['tickets']))
     print(json.dumps(output, sort_keys=True, indent=4, separators=(',', ': ')))
 
     sys.exit(0)
