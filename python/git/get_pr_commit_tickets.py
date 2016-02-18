@@ -187,6 +187,29 @@ def setup_args(args):
     return date, github_user, github_password, jira_user, jira_password
 
 
+def link_to_jira_ticket(link_to, tickets):
+    """Links the given tickets to the link_to ticket in jira"""
+    for ticket in tickets:
+        payload = {
+            "type": {
+                "name": "Relate",
+                "inward": "is related to",
+                "outward": "related to",
+            },
+            "inwardIssue": {
+                "key": link_to
+            },
+            "outwardIssue": {
+                "key": ticket
+            },
+            "comment": {
+                "body": "Automatically linked by script"
+            }
+        }
+        ticket_resp = requests.post("https://unified.jira.com/rest/api/latest/issueLink/", data=json.dumps(payload), auth=(jira_user, jira_password), headers={"Content-Type": "application/json"})
+        if ticket_resp.status_code != 201:
+            log.error("An error occurred linking ticket issue %s: [%s] %s", ticket, ticket_resp.status_code, ticket_resp.content)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="""
                                      Get all of the ticket numbers from commits in PRs made since the specified date.
@@ -199,11 +222,15 @@ if __name__ == "__main__":
     parser.add_argument('--github-password', '-G', dest='github_password', help='The github api password to use')
     parser.add_argument('--jira-user', '-j', dest='jira_user', help='The jira api user to use')
     parser.add_argument('--jira-password', '-J', dest='jira_password', help='The jira api password to use')
+    parser.add_argument('--link-to', '-l', dest='link', help='A ticket to link all of the PR tickets to')
     args = parser.parse_args()
 
     date, github_user, github_password, jira_user, jira_password = setup_args(args)
 
     output = get_all_ticket_data(date, github_user, github_password, jira_user, jira_password)
+
+    if args.link:
+        link_to_jira_ticket(args.link, output['tickets'])
 
     if args.all:
         print(json.dumps(output, sort_keys=True, indent=4, separators=(',', ': ')))
