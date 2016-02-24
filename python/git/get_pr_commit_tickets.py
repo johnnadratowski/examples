@@ -110,7 +110,12 @@ def resolve_jira_tickets(tickets, all_tickets, jira_user, jira_password):
 
     tickets_with_resolutions = {}
     for ticket in tickets:
-        fields = jira_data[ticket].get('fields', {})
+        jira_ticket = jira_data[ticket]
+        if not isinstance(jira_ticket, dict):
+            log.warning('Could not get JIRA info for ticket: %s. Message: %s', ticket, jira_ticket)
+            continue
+
+        fields = jira_ticket.get('fields', {})
         if not fields:
             continue
 
