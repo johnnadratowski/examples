@@ -104,7 +104,7 @@ def get_tag_date(tag):
     sys.exit(1)
 
 
-def resolve_jira_tickets(tickets, jira_user, jira_password):
+def resolve_jira_tickets(tickets, all_tickets, jira_user, jira_password):
     """Resolve the jira data to the tickets from the commits and PRs"""
     jira_data = get_jira_data(tickets, jira_user, jira_password)
 
@@ -121,10 +121,10 @@ def resolve_jira_tickets(tickets, jira_user, jira_password):
         links = fields.get('issuelinks', [])
         for link in links:
             outIssue = link.get('outwardIssue', {}).get('key')
-            if outIssue:
+            if outIssue and outIssue not in all_tickets:
                 linked_issues.append(outIssue)
         if linked_issues:
-            all_linked_data, linked_data = resolve_jira_tickets(linked_issues, jira_user, jira_password)
+            all_linked_data, linked_data = resolve_jira_tickets(linked_issues, linked_issues+all_tickets, jira_user, jira_password)
             jira_data.update(all_linked_data)
             ticket_data['linked_issues'] = linked_data
         tickets_with_resolutions[ticket] = ticket_data
@@ -137,7 +137,7 @@ def get_all_ticket_data(date, github_user, github_password, jira_user, jira_pass
     output = get_pr_tickets(date, github_user, github_password)
     output['tickets'] = sorted(list(output['tickets']))
     if jira_user and jira_password:
-        jira_data, ticket_resolutions = resolve_jira_tickets(output['tickets'], jira_user, jira_password)
+        jira_data, ticket_resolutions = resolve_jira_tickets(output['tickets'], output['tickets'], jira_user, jira_password)
 
         output["_all_jira_data"] = jira_data
         output['tickets_with_resolutions'] = ticket_resolutions
