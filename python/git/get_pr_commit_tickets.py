@@ -192,7 +192,27 @@ def setup_args(args):
     return date, github_user, github_password, jira_user, jira_password
 
 
-def link_to_jira_ticket(link_to, tickets):
+def create_jira_ticket(proj_id, title, description, jira_user, jira_password):
+    """Creates a new JIRA ticket in the project with the given ID"""
+    payload = {
+        "fields": {
+            "project": {
+                "key": proj_id
+            },
+            "summary": title,
+            "description": description,
+            "issuetype": {
+                "name": "Technical Task"
+            }
+        }
+    }
+    create_resp = requests.post("https://unified.jira.com/rest/api/latest/issue/", data=json.dumps(payload), auth=(jira_user, jira_password), headers={"Content-Type": "application/json"})
+    if create_resp.status_code != 201 and create_resp.status_code != 200:
+        log.error("An error occurred creating a new ticket in project %s: [%s] %s", proj_id, create_resp.status_code, create_resp.content)
+    return create_resp.json()
+
+
+def link_to_jira_ticket(link_to, tickets, jira_user, jira_password):
     """Links the given tickets to the link_to ticket in jira"""
     for ticket in tickets:
         payload = {
@@ -208,7 +228,7 @@ def link_to_jira_ticket(link_to, tickets):
                 "key": ticket
             },
             "comment": {
-                "body": "Automatically linked by script"
+                "body": "Automatically linked issue %s by script" % (ticket)
             }
         }
         ticket_resp = requests.post("https://unified.jira.com/rest/api/latest/issueLink/", data=json.dumps(payload), auth=(jira_user, jira_password), headers={"Content-Type": "application/json"})
@@ -228,14 +248,25 @@ if __name__ == "__main__":
     parser.add_argument('--jira-user', '-j', dest='jira_user', help='The jira api user to use')
     parser.add_argument('--jira-password', '-J', dest='jira_password', help='The jira api password to use')
     parser.add_argument('--link-to', '-l', dest='link', help='A ticket to link all of the PR tickets to')
+    parser.add_argument('--create-and-link', '-c', dest='create_and_link',
+                        help='A JIRA project ID to create a new ticket in and link the issues to. Example: CCRB,ASPM,etc.')
+    parser.add_argument('--create-ticket-title', '-T', dest='create_title', help='The title of the ticket to use when creating a new ticket')
+    parser.add_argument('--create-ticket-description', '-D', dest='create_desc', help='The description of the ticket to use when creating a new ticket')
     args = parser.parse_args()
 
     date, github_user, github_password, jira_user, jira_password = setup_args(args)
 
     output = get_all_ticket_data(date, github_user, github_password, jira_user, jira_password)
 
-    if args.link:
-        link_to_jira_ticket(args.link, output['tickets'])
+    if args.create_and_link or args.link:
+        if args.create_and_link:
+            create_data = create_jira_ticket(args.create_and_link, args.create_title, args.create_desc, jira_user, jira_password)
+            output["created_ticket"] = create_data
+            ticket = create_data["key"]
+            log.warning("Created ticket: %s", ticket)
+        else:
+            ticket = args.link
+        link_to_jira_ticket(ticket, output['tickets'], jira_user, jira_password)
 
     if args.all:
         print(json.dumps(output, sort_keys=True, indent=4, separators=(',', ': ')))
