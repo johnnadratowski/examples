@@ -7,7 +7,8 @@ ISC="$(remove_non_alpha "$(to_lower "$(clean_license_text 'Permission to use, co
 BSD="$(remove_non_alpha "$(to_lower "$(clean_license_text 'Redistribution and use in source and binary forms, with or without modification')")")"
 CC0="$(remove_non_alpha "$(to_lower "$(clean_license_text 'Copyright and related rights for sample code are waived via CC0.')")")"
 CCPL="$(remove_non_alpha "$(to_lower "$(clean_license_text 'THE WORK (AS DEFINED BELOW) IS PROVIDED UNDER THE TERMS OF THIS CREATIVE COMMONS PUBLIC LICENSE ("CCPL" OR "LICENSE").')")")"
-APACHE='http://www.apache.org/licenses/LICENSE-2.0'
+APACHE="$(remove_non_alpha "$(to_lower "$(clean_license_text 'http://www.apache.org/licenses/LICENSE-2.0')")")"
+MPL="$(remove_non_alpha "$(to_lower "$(clean_license_text 'Mozilla Public License')")")"
 
 
 declare -A PY_LICENSE_INFO
@@ -37,6 +38,8 @@ function get_license_type () {
 		echo "CCPL"
   elif [[ "${cmp}" == *"$APACHE"* ]]; then
 		echo "APACHE"
+  elif [[ "${cmp}" == *"$MPL"* ]]; then
+		echo "MPL"
 	else
 		echo "UNKNOWN"
 	fi
@@ -81,16 +84,40 @@ function build_py () {
 
 			PY_LICENSE_INFO[$pkg]=$licenseType
 			PY_LICENSES[$pkg]=$license
-			break
 		fi
 	done < $1/requirements.txt
+}
+
+function build_go () {
+	echo "Processing go project: $1"
+
+	local license licenseType licFile
+	for licFile in $(find ./$1/vendor -name "LICENSE*" -print); do
+		local dir=$(dirname $licFile)
+		local pkg=$(basename $dir)
+		if [ ${GO_LICENSE_INFO[$pkg]+_} ]; then continue; fi
+
+		echo "Processing go package: $pkg"
+
+		license="$(clean_license_text "$(cat "$licFile")")"
+		licenseType=$(get_license_type "$license")
+
+		if [[ "$licenseType" == "null" ]]; then
+			licenseType="UNKNOWN"
+		fi
+
+		if [[ "$licenseType" != "" ]]; then
+			GO_LICENSE_INFO[$pkg]="$licenseType"
+			GO_LICENSES[$pkg]="$license"
+		fi
+	done
 }
 
 function build_js () {
 	echo "Processing js project: $1"
 
-	local license licenseType licFile
-	for pkgFile in $(find ./$1 -name "package.json" -print | grep "util-promisify"); do
+	local pkgFile license licenseType licFile
+	for pkgFile in $(find ./$1 -name "package.json" -print); do
 		local dir=$(dirname $pkgFile)
 		local pkg=$(basename $dir)
 		if [ ${JS_LICENSE_INFO[$pkg]+_} ]; then continue; fi
@@ -98,7 +125,9 @@ function build_js () {
 		echo "Processing js package: $pkg"
 
 		licenseType="$(cat "$pkgFile" | jq -r '.license.type' 2> /dev/null)" || {
-				licenseType="$(cat "$pkgFile" | jq -r '.license')"
+				licenseType="$(cat "$pkgFile" | jq -r '.license')" || {
+					continue
+				}
 		}
 
 		license=""
@@ -119,6 +148,10 @@ function build_js () {
 			JS_LICENSES[$pkg]="$license"
 		fi
 	done
+}
+
+function build_mvn () {
+	return # TODO
 }
 
 function main () {
@@ -172,7 +205,10 @@ function main () {
 				continue
 			fi
 			if [[ "${INSTALL:-true}" == "true" ]]; then
-				mvn install -Dmaven.test.skip=true
+				mvn install -Dmaven.test.skip=true -Dmaven.repo.local=$d # need to fix this so repo is in current dir
+			fi
+			if [[ "${BUILD:-true}" == "true" ]]; then
+				build_mvn $name
 			fi
 		else
 			echo "$name is UNKNOWN"
@@ -180,21 +216,14 @@ function main () {
 		fi
 	done
 
-	if [[ "${TTYPE}" == "mvn" || ${TTYPE} == "" ]]; then
-		if [[ "${BUILD:-true}" == "true" ]]; then
-			build_mvn
-		fi
-	fi
-
-
 	local pkg
 	local licenseType
 	local license
 	if [[ "${TTYPE}" == "py" || ${TTYPE} == "" ]]; then
 		for pkg in "${!PY_LICENSE_INFO[@]}"; do 
 			echo "Writing package $pkg"
-			licenseType="${PY_LICENSE_INFO[$pkg]}"
-			license="${PY_LICENSES[$pkg]}"
+			licenseType="${PY_LICENSE_INFO["${pkg}"]}"
+			license="${PY_LICENSES["${pkg}"]}"
 			echo "python,$pkg,\"$licenseType\",\"$license\"" >> "${OUTPUT}"
 		done
 	fi
@@ -202,9 +231,27 @@ function main () {
 	if [[ "${TTYPE}" == "js" || ${TTYPE} == "" ]]; then
 		for pkg in "${!JS_LICENSE_INFO[@]}"; do 
 			echo "Writing package $pkg"
-			licenseType="${JS_LICENSE_INFO[$pkg]}"
-			license="${JS_LICENSES[$pkg]}"
-			echo "javascript,$pkg,\"$licenseType\",\"$license\"" >> "${OUTPUT}"
+			licenseType="${JS_LICENSE_INFO["${pkg}"]}"
+			license="${JS_LICENSES["${pkg}"]}"
+			echo "js,$pkg,\"$licenseType\",\"$license\"" >> "${OUTPUT}"
+		done
+	fi
+
+	if [[ "${TTYPE}" == "go" || ${TTYPE} == "" ]]; then
+		for pkg in "${!GO_LICENSE_INFO[@]}"; do 
+			echo "Writing package $pkg"
+			licenseType="${GO_LICENSE_INFO["${pkg}"]}"
+			license="${GO_LICENSES["${pkg}"]}"
+			echo "go,$pkg,\"$licenseType\",\"$license\"" >> "${OUTPUT}"
+		done
+	fi
+
+	if [[ "${TTYPE}" == "mvn" || ${TTYPE} == "" ]]; then
+		for pkg in "${!MVN_LICENSE_INFO[@]}"; do 
+			echo "Writing package $pkg"
+			licenseType="${MVN_LICENSE_INFO["${pkg}"]}"
+			license="${MVN_LICENSES["${pkg}"]}"
+			echo "java,$pkg,\"$licenseType\",\"$license\"" >> "${OUTPUT}"
 		done
 	fi
 }
