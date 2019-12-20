@@ -3,11 +3,11 @@ function quote_csv () {
 }
 
 function trim_whitespace () {
-	echo -e $(python -c "print('''$1'''.strip())")
+	echo -e "$(python -c "import sys; sys.stdout.write('''$1'''.strip())")"
 }
 
 function trim_quotes () {
-	echo -e $(python -c "print('''$1'''.strip('\"'))")
+	echo -e "$(python -c "import sys; sys.stdout.write('''$1'''.strip('\"'))")"
 }
 
 function remove_non_alpha () {
@@ -15,12 +15,14 @@ function remove_non_alpha () {
 }
 
 function normalize_whitespace () {
-	echo -e "$1" | sed 's/\\n/ /g' | tr -d "\n"
+	echo -e "$1" | sed 's/\\n/ /g' | tr -d '\n'
 }
 
 function to_lower () {
 	echo -e "${1,,}"
 }
+
 function clean_license_text () {
-	echo -e "$(quote_csv "$(trim_quotes "$(trim_whitespace "$(normalize_whitespace "$1")")")")"
+	local output="$(quote_csv "$(trim_quotes "$(trim_whitespace "$(normalize_whitespace "$1")")")")"
+	echo -e "${output:0:32650}"
 }

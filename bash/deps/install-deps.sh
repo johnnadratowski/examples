@@ -25,9 +25,6 @@ echo "language,library,license,license_text" > ${OUTPUT}
 function get_license_type () {
 	local cmp="$(remove_non_alpha "$(to_lower "${1}")")"
 
-	echo -e $cmp
-	echo '-------'
-	echo  -e $MIT
 	if [[ "${cmp}" == *"$MIT"* ]]; then
 		echo "MIT"
   elif [[ "${cmp}" == *"$ISC"* ]]; then
@@ -84,6 +81,7 @@ function build_py () {
 
 			PY_LICENSE_INFO[$pkg]=$licenseType
 			PY_LICENSES[$pkg]=$license
+			break
 		fi
 	done < $1/requirements.txt
 }
@@ -91,9 +89,34 @@ function build_py () {
 function build_js () {
 	echo "Processing js project: $1"
 
-	for d in $(ls -p $1/node_modules/ | grep ".*\/$"); do
-		if [[ -e $1/node_modules/$d/package.json ]]; then
-			cat $1/node_modules/$d/package.json | jq '.license'
+	local license licenseType licFile
+	for pkgFile in $(find ./$1 -name "package.json" -print | grep "util-promisify"); do
+		local dir=$(dirname $pkgFile)
+		local pkg=$(basename $dir)
+		if [ ${JS_LICENSE_INFO[$pkg]+_} ]; then continue; fi
+
+		echo "Processing js package: $pkg"
+
+		licenseType="$(cat "$pkgFile" | jq -r '.license.type' 2> /dev/null)" || {
+				licenseType="$(cat "$pkgFile" | jq -r '.license')"
+		}
+
+		license=""
+		for licFile in $(ls "$dir"/LICENSE* 2> /dev/null); do
+			license="$(clean_license_text "$(cat "$licFile")")"
+			if [[ "$licenseType" == "" ]]; then
+				licenseType=$(get_license_type "$license")
+			fi
+			break
+		done
+
+		if [[ "$licenseType" == "null" ]]; then
+			licenseType="UNKNOWN"
+		fi
+
+		if [[ "$licenseType" != "" ]]; then
+			JS_LICENSE_INFO[$pkg]="$licenseType"
+			JS_LICENSES[$pkg]="$license"
 		fi
 	done
 }
@@ -175,10 +198,17 @@ function main () {
 			echo "python,$pkg,\"$licenseType\",\"$license\"" >> "${OUTPUT}"
 		done
 	fi
+
+	if [[ "${TTYPE}" == "js" || ${TTYPE} == "" ]]; then
+		for pkg in "${!JS_LICENSE_INFO[@]}"; do 
+			echo "Writing package $pkg"
+			licenseType="${JS_LICENSE_INFO[$pkg]}"
+			license="${JS_LICENSES[$pkg]}"
+			echo "javascript,$pkg,\"$licenseType\",\"$license\"" >> "${OUTPUT}"
+		done
+	fi
 }
 
-# main
-
-get_license_type "$(pbpaste)"
+main
 
 echo "Done"
