@@ -2,12 +2,11 @@
 set -e
 
 . ./utils.sh
-
-MIT=$(clean_license_text 'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.')
-ISC=$(clean_license_text 'Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies')
-BSD=$(clean_license_text 'Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:')
-CC0=$(clean_license_text 'Copyright and related rights for sample code are waived via CC0.')
-CCPL=$(clean_license_text 'THE WORK (AS DEFINED BELOW) IS PROVIDED UNDER THE TERMS OF THIS CREATIVE COMMONS PUBLIC LICENSE ("CCPL" OR "LICENSE"). THE WORK IS PROTECTED BY COPYRIGHT AND/OR OTHER APPLICABLE LAW. ANY USE OF THE WORK OTHER THAN AS AUTHORIZED UNDER THIS LICENSE OR COPYRIGHT LAW IS PROHIBITED.')
+MIT="$(remove_non_alpha "$(to_lower "$(clean_license_text 'Permission is hereby granted, free of charge, to any person obtaining a copy of ')")")"
+ISC="$(remove_non_alpha "$(to_lower "$(clean_license_text 'Permission to use, copy, modify, and/or distribute this software for any purpose ')")")"
+BSD="$(remove_non_alpha "$(to_lower "$(clean_license_text 'Redistribution and use in source and binary forms, with or without modification')")")"
+CC0="$(remove_non_alpha "$(to_lower "$(clean_license_text 'Copyright and related rights for sample code are waived via CC0.')")")"
+CCPL="$(remove_non_alpha "$(to_lower "$(clean_license_text 'THE WORK (AS DEFINED BELOW) IS PROVIDED UNDER THE TERMS OF THIS CREATIVE COMMONS PUBLIC LICENSE ("CCPL" OR "LICENSE").')")")"
 APACHE='http://www.apache.org/licenses/LICENSE-2.0'
 
 
@@ -24,17 +23,22 @@ declare OUTPUT=${OUTPUT:-/tmp/licenses.csv}
 echo "language,library,license,license_text" > ${OUTPUT}
 
 function get_license_type () {
-	if [[ "$1" == *$MIT* ]]; then
+	local cmp="$(remove_non_alpha "$(to_lower "${1}")")"
+
+	echo -e $cmp
+	echo '-------'
+	echo  -e $MIT
+	if [[ "${cmp}" == *"$MIT"* ]]; then
 		echo "MIT"
-  elif [[ "$1" == *$ISC* ]]; then
+  elif [[ "${cmp}" == *"$ISC"* ]]; then
 		echo "ISC"
-  elif [[ "$1" == *$BSD* ]]; then
+  elif [[ "${cmp}" == *"$BSD"* ]]; then
 		echo "BSD"
-  elif [[ "$1" == *$CC0* ]]; then
+  elif [[ "${cmp}" == *"$CC0"* ]]; then
 		echo "CC0"
-  elif [[ "$1" == *$CCPL* ]]; then
+  elif [[ "${cmp}" == *"$CCPL"* ]]; then
 		echo "CCPL"
-  elif [[ "$1" == *$APACHE* ]]; then
+  elif [[ "${cmp}" == *"$APACHE"* ]]; then
 		echo "APACHE"
 	else
 		echo "UNKNOWN"
@@ -175,6 +179,6 @@ function main () {
 
 # main
 
-get_license_type $(pbpaste)
+get_license_type "$(pbpaste)"
 
 echo "Done"
